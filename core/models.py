@@ -3,6 +3,7 @@ from django.db import models
 from django.db.models import Sum
 from django.shortcuts import reverse
 from django_countries.fields import CountryField
+from django.core.exceptions import ValidationError
 
 # Create your models here.
 CATEGORY_CHOICES = (
@@ -150,15 +151,31 @@ class Order(models.Model):
         return total
 
 
+class City(models.Model):
+    name = models.CharField(max_length=128)
+    country = CountryField()  # ISO alpha-2
+
+    class Meta:
+        unique_together = ('name', 'country')
+        ordering = ['name']
+
+    def __str__(self):
+        return self.name
+
 class BillingAddress(models.Model):
-    user = models.ForeignKey(settings.AUTH_USER_MODEL,
-                             on_delete=models.CASCADE)
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE)
     street_address = models.CharField(max_length=100)
-    apartment_address = models.CharField(max_length=100)
+    apartment_address = models.CharField(max_length=100, blank=True)
     country = CountryField(multiple=False)
+    city = models.ForeignKey('core.City', on_delete=models.PROTECT, null=True, blank=True)
     zip = models.CharField(max_length=100)
     address_type = models.CharField(max_length=1, choices=ADDRESS_CHOICES)
     default = models.BooleanField(default=False)
+
+    def clean(self):
+        # Ensure city’s country matches selected country
+        if self.city and self.country and self.city.country != self.country:
+            raise ValidationError({'city': 'Selected city does not belong to the chosen country.'})
 
     def __str__(self):
         return self.user.username

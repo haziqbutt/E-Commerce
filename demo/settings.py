@@ -10,7 +10,7 @@ ENVIRONMENT = os.getenv("ENVIRONMENT", "development")
 
 DEBUG = os.getenv("DEBUG", "False") == "True"
 SECRET_KEY = os.getenv("SECRET_KEY", "fallback-secret")
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "").split(",")
+ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "*").split(",")
 
 # Installed apps
 INSTALLED_APPS = [

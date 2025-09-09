@@ -1,4 +1,6 @@
 from django.urls import path
+from . import views  # <-- add this
+
 from .views import (
     ItemDetailView,
     HomeView,
@@ -29,5 +31,8 @@ urlpatterns = [
     path('remove-item-from-cart/<slug>/', remove_single_item_from_cart,
          name='remove-single-item-from-cart'),
     path('payment/<payment_option>/', PaymentView.as_view(), name='payment'),
-    path('request-refund/', RequestRefundView.as_view(), name='request-refund')
+    path('request-refund/', RequestRefundView.as_view(), name='request-refund'),
+
+    # ✅ AJAX endpoint for cities
+    path('ajax/load-cities/', views.load_cities, name='ajax_load_cities'),
 ]

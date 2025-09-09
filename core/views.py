@@ -10,6 +10,8 @@ from django.utils import timezone
 from .forms import CheckoutForm, CouponForm, RefundForm
 from .models import Item, OrderItem, Order, BillingAddress, Payment, Coupon, Refund, Category
 from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseBadRequest
+from .models import Order, BillingAddress, City 
 
 # Create your views here.
 import random
@@ -155,58 +157,77 @@ class CheckoutView(View):
     def get(self, *args, **kwargs):
         try:
             order = Order.objects.get(user=self.request.user, ordered=False)
-            form = CheckoutForm()
-            context = {
-                'form': form,
-                'couponform': CouponForm(),
-                'order': order,
-                'DISPLAY_COUPON_FORM': True
-            }
-            return render(self.request, "checkout.html", context)
-
         except ObjectDoesNotExist:
             messages.info(self.request, "You do not have an active order")
-            return redirect("core:checkout")
+            return redirect("core:order-summary")
+
+        form = CheckoutForm()
+        context = {
+            'form': form,
+            'couponform': CouponForm(),
+            'order': order,
+            'DISPLAY_COUPON_FORM': True,
+        }
+        return render(self.request, "checkout.html", context)
 
     def post(self, *args, **kwargs):
         form = CheckoutForm(self.request.POST or None)
         try:
             order = Order.objects.get(user=self.request.user, ordered=False)
-            print(self.request.POST)
-            if form.is_valid():
-                street_address = form.cleaned_data.get('street_address')
-                apartment_address = form.cleaned_data.get('apartment_address')
-                country = form.cleaned_data.get('country')
-                zip = form.cleaned_data.get('zip')
-                # add functionality for these fields
-                # same_shipping_address = form.cleaned_data.get(
-                #     'same_shipping_address')
-                # save_info = form.cleaned_data.get('save_info')
-                payment_option = form.cleaned_data.get('payment_option')
-                billing_address = BillingAddress(
-                    user=self.request.user,
-                    street_address=street_address,
-                    apartment_address=apartment_address,
-                    country=country,
-                    zip=zip,
-                    address_type='B'
-                )
-                billing_address.save()
-                order.billing_address = billing_address
-                order.save()
-
-                # add redirect to the selected payment option
-                if payment_option == 'S':
-                    return redirect('core:payment', payment_option='stripe')
-                elif payment_option == 'P':
-                    return redirect('core:payment', payment_option='paypal')
-                else:
-                    messages.warning(
-                        self.request, "Invalid payment option select")
-                    return redirect('core:checkout')
         except ObjectDoesNotExist:
             messages.error(self.request, "You do not have an active order")
             return redirect("core:order-summary")
+
+        if form.is_valid():
+            cd = form.cleaned_data
+            # cd['city'] is a City instance (FK) provided by the form
+            billing_address = BillingAddress.objects.create(
+                user=self.request.user,
+                street_address=cd['street_address'],
+                apartment_address=cd.get('apartment_address', ''),
+                country=cd['country'],  # ISO code like "PK"
+                city=cd['city'],        # Save the City FK
+                zip=cd['zip'],
+                address_type='B',
+                default=False,
+            )
+            order.billing_address = billing_address
+            order.save()
+
+            payment_option = cd['payment_option']
+            if payment_option == 'S':
+                return redirect('core:payment', payment_option='stripe')
+            elif payment_option == 'P':
+                return redirect('core:payment', payment_option='paypal')
+
+            messages.warning(self.request, "Invalid payment option selected")
+            return redirect('core:checkout')
+
+        # Invalid form: re-render with errors and context
+        messages.error(self.request, "Please correct the errors below.")
+        context = {
+            'form': form,
+            'couponform': CouponForm(),
+            'order': order,
+            'DISPLAY_COUPON_FORM': True,
+        }
+        return render(self.request, "checkout.html", context, status=400)
+
+
+def load_cities(request):
+    """
+    AJAX endpoint for dependent City dropdown.
+    Returns <option> tags for the given country code (e.g., 'PK').
+    """
+    country = request.GET.get('country')
+    if not country:
+        return HttpResponseBadRequest("Missing country")
+
+    cities = City.objects.filter(country=country).order_by('name')
+    options = ['<option value="">Choose...</option>'] + [
+        f'<option value="{c.id}">{c.name}</option>' for c in cities
+    ]
+    return HttpResponse('\n'.join(options))
 
 
 # def home(request):
@@ -327,7 +348,8 @@ def get_coupon(request, code):
         return coupon
     except ObjectDoesNotExist:
         messages.info(request, "This coupon does not exist")
-        return redirect("core:checkout")
+        # FIX: don't return a redirect object here; just return None so caller can decide
+        return None
 
 
 class AddCouponView(View):
@@ -338,13 +360,17 @@ class AddCouponView(View):
                 code = form.cleaned_data.get('code')
                 order = Order.objects.get(
                     user=self.request.user, ordered=False)
-                order.coupon = get_coupon(self.request, code)
-                order.save()
-                messages.success(self.request, "Successfully added coupon")
+                coupon = get_coupon(self.request, code)
+                if coupon is not None:
+                    order.coupon = coupon
+                    order.save()
+                    messages.success(self.request, "Successfully added coupon")
+                # if coupon is None, message already shown in get_coupon()
                 return redirect("core:checkout")
 
             except ObjectDoesNotExist:
-                messages.info(request, "You do not have an active order")
+                # FIX: use self.request (request is undefined here)
+                messages.info(self.request, "You do not have an active order")
                 return redirect("core:checkout")
 
 
@@ -381,3 +407,13 @@ class RequestRefundView(View):
             except ObjectDoesNotExist:
                 messages.info(self.request, "This order does not exist")
                 return redirect("core:request-refund")
+
+def load_cities(request):
+    country = request.GET.get('country')
+    if not country:
+        return HttpResponseBadRequest("Missing country")
+    cities = City.objects.filter(country=country).order_by('name')
+    options = ['<option value="">Choose...</option>'] + [
+        f'<option value="{c.id}">{c.name}</option>' for c in cities
+    ]
+    return HttpResponse('\n'.join(options))
